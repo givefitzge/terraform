@@ -95,7 +95,9 @@ type NodeAbstractResource struct {
 	overridePreventDestroy bool
 
 	// Set by GraphNodeAttachResourceConfig
-	ActionConfigs           addrs.Map[addrs.ConfigAction, *configs.Action]
+	ActionConfigs addrs.Map[addrs.ConfigAction, *configs.Action]
+
+	// The address of the provider for each config action referenced by the resource
 	resolvedActionProviders addrs.Map[addrs.ConfigAction, addrs.AbsProviderConfig]
 }
 
@@ -104,6 +106,7 @@ var (
 	_ GraphNodeReferencer                  = (*NodeAbstractResource)(nil)
 	_ GraphNodeImportReferencer            = (*NodeAbstractResource)(nil)
 	_ GraphNodeProviderConsumer            = (*NodeAbstractResource)(nil)
+	_ GraphNodeActionProvidersConsumer     = (*NodeAbstractResource)(nil)
 	_ GraphNodeProvisionerConsumer         = (*NodeAbstractResource)(nil)
 	_ GraphNodeConfigResource              = (*NodeAbstractResource)(nil)
 	_ GraphNodeAttachResourceConfig        = (*NodeAbstractResource)(nil)
@@ -436,6 +439,80 @@ func (n *NodeAbstractResource) AttachActionConfig(action addrs.ConfigAction, cfg
 		n.ActionConfigs = addrs.MakeMap[addrs.ConfigAction, *configs.Action]()
 	}
 	n.ActionConfigs.Put(action, cfg)
+}
+
+// ActionsProvidedBy implements GraphNodeActionProvidersConsumer
+func (n *NodeAbstractResource) ActionsProvidedBy() addrs.Map[addrs.ConfigAction, ProviderRequest] {
+	reqs := addrs.MakeMap[addrs.ConfigAction, ProviderRequest]()
+	if n.resolvedActionProviders.Len() > 0 {
+		for configAction, provider := range n.resolvedActionProviders.Iter() {
+			req := ProviderRequest{
+				Addr:  provider,
+				Exact: true,
+			}
+			reqs.Put(configAction, req)
+		}
+		return reqs
+	}
+
+	if n.Config == nil || n.Config.Managed == nil {
+		return reqs
+	}
+
+	for _, at := range n.Config.Managed.ActionTriggers {
+		for _, aRef := range at.Actions {
+			actionCfg, ok := n.ActionConfigs.GetOk(aRef.ConfigAction.Action.InModule(n.ModulePath()))
+			if !ok {
+				// this really shouldn't happen, but is it worth a panic?
+				continue
+			}
+
+			if actionCfg != nil {
+				relAddr := actionCfg.ProviderConfigAddr()
+				req := ProviderRequest{
+					Addr: addrs.LocalProviderConfig{
+						LocalName: relAddr.LocalName,
+						Alias:     relAddr.Alias,
+					},
+					Exact: false,
+				}
+				reqs.Put(aRef.ConfigAction, req)
+			}
+		}
+	}
+
+	return reqs
+}
+
+// ActionProviders implements GraphNodeActionProvidersConsumer
+func (n *NodeAbstractResource) ActionProviders() addrs.Map[addrs.ConfigAction, addrs.Provider] {
+	providers := addrs.MakeMap[addrs.ConfigAction, addrs.Provider]()
+	if n.Config == nil || n.Config.Managed == nil {
+		return providers
+	}
+
+	for _, at := range n.Config.Managed.ActionTriggers {
+		for _, action := range at.Actions {
+			cfg, ok := n.ActionConfigs.GetOk(action.ConfigAction)
+			if !ok {
+				continue
+			}
+			if cfg.Provider.Type != "" {
+				providers.Put(action.ConfigAction, cfg.Provider)
+			} else {
+				providers.Put(action.ConfigAction, addrs.ImpliedProviderForUnqualifiedType(action.ConfigAction.Action.Type))
+			}
+		}
+	}
+
+	return providers
+}
+
+func (n *NodeAbstractResource) AppendProvider(action addrs.ConfigAction, provider addrs.AbsProviderConfig) {
+	if n.resolvedActionProviders.Len() == 0 {
+		n.resolvedActionProviders = addrs.MakeMap[addrs.ConfigAction, addrs.AbsProviderConfig]()
+	}
+	n.resolvedActionProviders.Put(action, provider)
 }
 
 // GraphNodeAttachResourceSchema impl

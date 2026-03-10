@@ -97,7 +97,7 @@ func (t *AttachResourceConfigTransformer) Transform(g *Graph) error {
 		actions := arn.ActionAddrs()
 		for _, action := range actions {
 			if a := config.Module.ActionByAddr(action.Action); a != nil {
-				log.Printf("[TRACE] AttachResourceConfigTransformer: attaching to %q (%T) config from %#v", dag.VertexName(v), v, a.DeclRange)
+				log.Printf("[TRACE] AttachResourceConfigTransformer: attaching to %q (%T) action config from %#v", dag.VertexName(v), v, a.DeclRange)
 				arn.AttachActionConfig(action, a)
 			}
 		}

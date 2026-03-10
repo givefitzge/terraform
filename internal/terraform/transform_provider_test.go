@@ -433,6 +433,29 @@ provider "test" {
 	}
 }
 
+func TestProviderTransformer_actions(t *testing.T) {
+	mod := testModule(t, "transform-provider-actions")
+
+	g := testProviderTransformerGraph(t, mod)
+	{
+		transform := &MissingProviderTransformer{}
+		if err := transform.Transform(g); err != nil {
+			t.Fatalf("err: %s", err)
+		}
+	}
+
+	transform := &ProviderTransformer{}
+	if err := transform.Transform(g); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	actual := strings.TrimSpace(g.String())
+	expected := strings.TrimSpace(testTransformProviderActionsStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
+	}
+}
+
 const testTransformProviderBasicStr = `
 aws_instance.web
   provider["registry.terraform.io/hashicorp/aws"]
@@ -491,4 +514,14 @@ const testTransformModuleProviderGrandparentStr = `
 module.child.module.grandchild.aws_instance.baz
   provider["registry.terraform.io/hashicorp/aws"].foo
 provider["registry.terraform.io/hashicorp/aws"].foo
+`
+
+const testTransformProviderActionsStr = `
+action.test_action.verb (expand)
+  provider["registry.terraform.io/hashicorp/test"]
+aws_instance.web
+  provider["registry.terraform.io/hashicorp/aws"]
+  provider["registry.terraform.io/hashicorp/test"]
+provider["registry.terraform.io/hashicorp/aws"]
+provider["registry.terraform.io/hashicorp/test"]
 `
