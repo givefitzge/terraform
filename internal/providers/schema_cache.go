@@ -6,6 +6,7 @@ package providers
 import (
 	"sync"
 
+	"github.com/apparentlymart/go-versions/versions"
 	"github.com/hashicorp/terraform/internal/addrs"
 )
 
@@ -13,7 +14,7 @@ import (
 // This will be accessed by both core and the provider clients to ensure that
 // large schemas are stored in a single location.
 var SchemaCache = &schemaCache{
-	m: make(map[addrs.Provider]ProviderSchema),
+	m: make(map[addrs.Provider]map[versions.Version]ProviderSchema),
 }
 
 // Global cache for provider schemas
@@ -22,20 +23,30 @@ var SchemaCache = &schemaCache{
 // concurrent calls resulting in an error can be handled in the same manner.
 type schemaCache struct {
 	mu sync.Mutex
-	m  map[addrs.Provider]ProviderSchema
+	m  map[addrs.Provider]map[versions.Version]ProviderSchema
 }
 
-func (c *schemaCache) Set(p addrs.Provider, s ProviderSchema) {
+func (c *schemaCache) Set(p addrs.Provider, v versions.Version, s ProviderSchema) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.m[p] = s
+	if c.m[p] == nil {
+		c.m[p] = make(map[versions.Version]ProviderSchema)
+	}
+	c.m[p][v] = s
 }
 
-func (c *schemaCache) Get(p addrs.Provider) (ProviderSchema, bool) {
+func (c *schemaCache) Get(p addrs.Provider, v versions.Version) (ProviderSchema, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	s, ok := c.m[p]
+	// Check for whether the provider exists in the cache at all
+	vMap, ok := c.m[p]
+	if !ok {
+		return ProviderSchema{}, false
+	}
+
+	// Try to access the schema for the specific version
+	s, ok := vMap[v]
 	return s, ok
 }

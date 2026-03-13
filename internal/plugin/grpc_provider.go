@@ -10,6 +10,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/apparentlymart/go-versions/versions"
 	plugin "github.com/hashicorp/go-plugin"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
@@ -64,6 +65,12 @@ type GRPCProvider struct {
 	// but it may not always be available for alternative execute modes.
 	Addr addrs.Provider
 
+	// Version describes the version of the provider in use.
+	// This is only necessary for when we cache GetProviderSchema responses,
+	// because in the content of pluggable state storage users briefly use two
+	// versions of the same provider in the same operation.
+	Version versions.Version
+
 	// Proto client use to make the grpc service calls.
 	client proto.ProviderClient
 
@@ -84,7 +91,7 @@ func (p *GRPCProvider) GetProviderSchema() providers.GetProviderSchemaResponse {
 
 	// check the global cache if we can
 	if !p.Addr.IsZero() {
-		if resp, ok := providers.SchemaCache.Get(p.Addr); ok && resp.ServerCapabilities.GetProviderSchemaOptional {
+		if resp, ok := providers.SchemaCache.Get(p.Addr, p.Version); ok && resp.ServerCapabilities.GetProviderSchemaOptional {
 			logger.Trace("GRPCProvider: returning cached schema", p.Addr.String())
 			return resp
 		}
