@@ -9,6 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/hashicorp/hcl/v2/hclwrite"
+	"github.com/hashicorp/terraform/internal/ast"
+	"github.com/zclconf/go-cty/cty"
 )
 
 // Migration represents a single JSON migration file.
@@ -164,4 +171,98 @@ func FilterMigrations(migrations []*Migration, pattern string) []*Migration {
 		}
 	}
 	return result
+}
+
+// Execute applies a migration to all matching blocks in the module.
+func Execute(m *Migration, mod *ast.Module) error {
+	results := mod.FindBlocks(m.Match.BlockType, m.Match.Label)
+
+	for _, r := range results {
+		for _, action := range m.Actions {
+			if err := executeAction(action, r, mod); err != nil {
+				return fmt.Errorf("migration %q: %w", m.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func executeAction(a Action, r *ast.BlockResult, mod *ast.Module) error {
+	switch a.Action {
+	case "rename_attribute":
+		r.Block.RenameAttribute(a.From, a.To)
+
+	case "remove_attribute":
+		r.Block.RemoveAttribute(a.Name)
+
+	case "rename_resource":
+		oldLabels := r.Block.Labels()
+		if len(oldLabels) == 0 {
+			return fmt.Errorf("rename_resource: block has no labels")
+		}
+		oldType := oldLabels[0]
+		newLabels := make([]string, len(oldLabels))
+		copy(newLabels, oldLabels)
+		newLabels[0] = a.To
+		r.Block.SetLabels(newLabels)
+
+		// Rename references across entire module
+		oldTraversal := hcl.Traversal{hcl.TraverseRoot{Name: oldType}}
+		newTraversal := hcl.Traversal{hcl.TraverseRoot{Name: a.To}}
+		mod.RenameReferencePrefix(oldTraversal, newTraversal)
+
+	case "add_comment":
+		r.File.AppendComment(a.Text)
+
+	case "set_attribute_value":
+		val, err := parseValue(a.Value)
+		if err != nil {
+			return fmt.Errorf("set_attribute_value: %w", err)
+		}
+		r.Block.SetAttributeValue(a.Name, val)
+
+	case "add_attribute":
+		if r.Block.HasAttribute(a.Name) {
+			return nil // already present, skip
+		}
+		val, err := parseValue(a.Value)
+		if err != nil {
+			return fmt.Errorf("add_attribute: %w", err)
+		}
+		r.Block.SetAttributeValue(a.Name, val)
+
+	case "replace_value":
+		expr := r.Block.GetAttributeExpression(a.Name)
+		if expr == nil {
+			return nil // attribute not present, skip
+		}
+		got := strings.TrimSpace(string(expr.BuildTokens(nil).Bytes()))
+		if got == a.OldValue {
+			tokens := hclwrite.Tokens{
+				{Type: hclsyntax.TokenIdent, Bytes: []byte(a.NewValue)},
+			}
+			r.Block.SetAttributeRaw(a.Name, tokens)
+		}
+
+	default:
+		return fmt.Errorf("unknown action %q", a.Action)
+	}
+	return nil
+}
+
+// parseValue converts a string to a cty.Value.
+// Supports: "true"/"false" -> cty.BoolVal, integers -> cty.NumberIntVal,
+// everything else -> cty.StringVal.
+func parseValue(s string) (cty.Value, error) {
+	if s == "true" {
+		return cty.True, nil
+	}
+	if s == "false" {
+		return cty.False, nil
+	}
+	var n int64
+	if _, err := fmt.Sscanf(s, "%d", &n); err == nil {
+		return cty.NumberIntVal(n), nil
+	}
+	return cty.StringVal(s), nil
 }
