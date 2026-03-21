@@ -15,11 +15,11 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/hashicorp/terraform/internal/rpcapi/terraform1/setup"
+	"github.com/hashicorp/terraform/internal/telemetrytest"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -28,78 +28,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 )
-
-// initTelemetryForTest configures OpenTelemetry to collect spans into a
-// local in-memory buffer and returns an object that provides access to that
-// buffer.
-//
-// The OpenTelemetry tracer provider is a global cross-cutting concern shared
-// throughout the program, so it isn't valid to use this function in any test
-// that calls t.Parallel, or in subtests of a parent test that has already
-// used this function.
-func initTelemetryForTest(t *testing.T, providerOptions ...sdktrace.TracerProviderOption) *tracetest.InMemoryExporter {
-	t.Helper()
-
-	exp := tracetest.NewInMemoryExporter()
-	sp := sdktrace.NewSimpleSpanProcessor(exp)
-	providerOptions = append(
-		[]sdktrace.TracerProviderOption{
-			sdktrace.WithSpanProcessor(sp),
-		},
-		providerOptions...,
-	)
-	provider := sdktrace.NewTracerProvider(providerOptions...)
-	otel.SetTracerProvider(provider)
-
-	pgtr := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
-	otel.SetTextMapPropagator(pgtr)
-
-	// We'll automatically shut down the provider at the end of the test run,
-	// because otherwise a subsequent test which runs something that generates
-	// telemetry _without_ calling initTelemetryForTest (which is optional)
-	// could end up appending irrelevant spans to an earlier test's exporter.
-	t.Cleanup(func() {
-		provider.Shutdown(context.Background())
-		otel.SetTracerProvider(nil)
-		otel.SetTextMapPropagator(nil)
-	})
-
-	t.Log("OpenTelemetry initialized")
-	return exp
-}
-
-// findTestTelemetrySpan tests each of the spans that have been reported to the
-// given [tracetest.InMemoryExporter] with the given predicate function and
-// returns the first one for which the predicate matches.
-//
-// If the predicate returns false for all spans then this function will fail
-// the test using the given [testing.T].
-func findTestTelemetrySpan(t *testing.T, exp *tracetest.InMemoryExporter, predicate func(tracetest.SpanStub) bool) tracetest.SpanStub {
-	for _, span := range exp.GetSpans() {
-		if predicate(span) {
-			return span
-		}
-	}
-	t.Fatal("no spans matched the predicate")
-	return tracetest.SpanStub{}
-}
-
-// findTestTelemetrySpans tests each of the spans that have been reported to the
-// given [tracetest.InMemoryExporter] with the given predicate function and
-// returns only those for which the predicate matches.
-//
-// If no spans match at all then the result is a zero-length slice. If you are
-// expecting to find exactly one matching span then [findTestTelemetrySpan]
-// (singular) might be more convenient.
-func findTestTelemetrySpans(t *testing.T, exp *tracetest.InMemoryExporter, predicate func(tracetest.SpanStub) bool) tracetest.SpanStubs {
-	var ret tracetest.SpanStubs
-	for _, span := range exp.GetSpans() {
-		if predicate(span) {
-			ret = append(ret, span)
-		}
-	}
-	return ret
-}
 
 // overwriteTestSpanTimestamps overwrites the timestamps in all of the given
 // spans to be exactly the given fakeTime, as a way to avoid considering exact
@@ -142,7 +70,7 @@ func TestTelemetryInTests(t *testing.T) {
 		semconv.ServiceVersionKey.String("1.2.3"),
 	)
 
-	telemetry := initTelemetryForTest(t,
+	telemetry := telemetrytest.Init(t,
 		sdktrace.WithResource(testResource),
 	)
 
@@ -228,7 +156,7 @@ func TestTelemetryInTestsGRPC(t *testing.T) {
 		semconv.SchemaURL,
 		semconv.ServiceNameKey.String("TestTelemetryInTestsGRPC"),
 	)
-	telemetry := initTelemetryForTest(t,
+	telemetry := telemetrytest.Init(t,
 		sdktrace.WithResource(testResource),
 	)
 
@@ -254,10 +182,10 @@ func TestTelemetryInTestsGRPC(t *testing.T) {
 		span.End()
 	}
 
-	clientSpan := findTestTelemetrySpan(t, telemetry, func(ss tracetest.SpanStub) bool {
+	clientSpan := telemetrytest.FindSpan(t, telemetry, func(ss tracetest.SpanStub) bool {
 		return ss.SpanKind == trace.SpanKindClient
 	})
-	serverSpan := findTestTelemetrySpan(t, telemetry, func(ss tracetest.SpanStub) bool {
+	serverSpan := telemetrytest.FindSpan(t, telemetry, func(ss tracetest.SpanStub) bool {
 		return ss.SpanKind == trace.SpanKindServer
 	})
 	t.Run("client span", func(t *testing.T) {
@@ -266,7 +194,7 @@ func TestTelemetryInTestsGRPC(t *testing.T) {
 		if got, want := span.Name, "terraform1.setup.Setup/Handshake"; got != want {
 			t.Errorf("wrong name\ngot:  %s\nwant: %s", got, want)
 		}
-		attrs := otelAttributesMap(span.Attributes)
+		attrs := telemetrytest.AttributesMap(span.Attributes)
 		if got, want := attrs["rpc.system"], "grpc"; got != want {
 			t.Errorf("wrong rpc.system\ngot:  %s\nwant: %s", got, want)
 		}
@@ -289,7 +217,7 @@ func TestTelemetryInTestsGRPC(t *testing.T) {
 		if got, want := serverSpan.SpanContext.TraceID(), clientSpan.SpanContext.TraceID(); got != want {
 			t.Errorf("server span belongs to different trace than client span\nclient trace ID: %s\nserver trace ID: %s", want, got)
 		}
-		attrs := otelAttributesMap(span.Attributes)
+		attrs := telemetrytest.AttributesMap(span.Attributes)
 		if got, want := attrs["rpc.system"], "grpc"; got != want {
 			t.Errorf("wrong rpc.system\ngot:  %s\nwant: %s", got, want)
 		}
@@ -300,12 +228,4 @@ func TestTelemetryInTestsGRPC(t *testing.T) {
 			t.Errorf("wrong rpc.method\ngot:  %s\nwant: %s", got, want)
 		}
 	})
-}
-
-func otelAttributesMap(kvs []attribute.KeyValue) map[string]any {
-	ret := make(map[string]any, len(kvs))
-	for _, kv := range kvs {
-		ret[string(kv.Key)] = kv.Value.AsInterface()
-	}
-	return ret
 }
