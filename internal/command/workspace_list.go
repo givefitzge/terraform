@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/cli"
 	"github.com/hashicorp/terraform/internal/command/arguments"
+	"github.com/hashicorp/terraform/internal/command/views"
+	"github.com/hashicorp/terraform/internal/tfdiags"
 	"github.com/posener/complete"
 )
 
@@ -18,6 +21,8 @@ type WorkspaceListCommand struct {
 }
 
 func (c *WorkspaceListCommand) Run(args []string) int {
+	var diags tfdiags.Diagnostics
+
 	args = c.Meta.process(args)
 	envCommandShowWarning(c.Ui, c.LegacyName)
 
@@ -28,18 +33,30 @@ func (c *WorkspaceListCommand) Run(args []string) int {
 		return 1
 	}
 
+	// Prepare the view
+	//
+	viewType := arguments.ViewHuman
+	view := newWorkspaceList(viewType, c.View, c.Ui, &c.Meta)
+	c.View.Configure(&arguments.View{
+		NoColor:         !c.Meta.Color,
+		CompactWarnings: c.Meta.compactWarnings,
+	})
+
+	// Warn against using `terraform env` commands
+	envCommandShowWarning(c.Ui, c.LegacyName)
+
 	args = cmdFlags.Args()
 	configPath, err := ModulePath(args)
 	if err != nil {
-		c.Ui.Error(err.Error())
+		diags.Append(err)
+		view.List("", nil, diags)
 		return 1
 	}
 
 	// Load the backend
-	view := arguments.ViewHuman
-	b, diags := c.backend(configPath, view)
+	b, diags := c.backend(configPath, viewType)
 	if diags.HasErrors() {
-		c.showDiagnostics(diags)
+		view.List("", nil, diags)
 		return 1
 	}
 
@@ -49,33 +66,25 @@ func (c *WorkspaceListCommand) Run(args []string) int {
 	states, wDiags := b.Workspaces()
 	diags = diags.Append(wDiags)
 	if wDiags.HasErrors() {
-		c.Ui.Error(wDiags.Err().Error())
+		view.List("", nil, diags)
 		return 1
 	}
-	c.showDiagnostics(diags) // output warnings, if any
 
 	env, isOverridden := c.WorkspaceOverridden()
 
-	if len(states) != 0 {
-		var out bytes.Buffer
-		for _, s := range states {
-			if s == env {
-				out.WriteString("* ")
-			} else {
-				out.WriteString("  ")
-			}
-			out.WriteString(s + "\n")
-		}
-
-		c.Ui.Output(out.String())
-	} else {
-		// Warn that no states exist
-		c.showDiagnostics(warnNoEnvsExistDiag(env))
-	}
-
 	if isOverridden {
-		c.Ui.Output(envIsOverriddenNote)
+		warn := tfdiags.Sourceless(
+			tfdiags.Warning,
+			envIsOverriddenNote,
+			"",
+		)
+		diags = diags.Append(warn)
 	}
+
+	// Print:
+	// 1. Diagnostics
+	// 2. The list of workspaces, highlighting the current workspace
+	view.List(env, states, diags)
 
 	return 0
 }
@@ -100,4 +109,47 @@ Usage: terraform [global options] workspace list
 
 func (c *WorkspaceListCommand) Synopsis() string {
 	return "List Workspaces"
+}
+
+type workspaceHuman struct {
+	ui   cli.Ui
+	meta *Meta
+}
+
+// List is used to assemble the list of Workspaces and log it via Output
+func (v *workspaceHuman) List(selected string, list []string, diags tfdiags.Diagnostics) {
+	// Print diags above output
+	v.meta.showDiagnostics(diags)
+
+	// Print list
+	if len(list) > 0 {
+		var out bytes.Buffer
+		for _, s := range list {
+			if s == selected {
+				out.WriteString("* ")
+			} else {
+				out.WriteString("  ")
+			}
+			out.WriteString(s + "\n")
+		}
+		v.ui.Output(out.String())
+	}
+}
+
+// newWorkspace returns a views.Workspace interface.
+//
+// When human-readable output is migrated from cli.Ui to views.View this method should be deleted and
+// replaced with using views.NewWorkspace directly.
+func newWorkspaceList(vt arguments.ViewType, view *views.View, ui cli.Ui, meta *Meta) views.WorkspaceList {
+	switch vt {
+	case arguments.ViewJSON:
+		panic("JSON output is not supported for workspace list command")
+	case arguments.ViewHuman:
+		return &workspaceHuman{
+			ui:   ui,
+			meta: meta,
+		}
+	default:
+		panic(fmt.Sprintf("unknown view type %v", vt))
+	}
 }
