@@ -18,7 +18,6 @@ import (
 	"github.com/hashicorp/terraform/internal/genconfig"
 	"github.com/hashicorp/terraform/internal/instances"
 	"github.com/hashicorp/terraform/internal/lang/ephemeral"
-	"github.com/hashicorp/terraform/internal/lang/langrefs"
 	"github.com/hashicorp/terraform/internal/moduletest/mocking"
 	"github.com/hashicorp/terraform/internal/plans"
 	"github.com/hashicorp/terraform/internal/plans/deferring"
@@ -1048,9 +1047,6 @@ func (n *NodePlannableResourceInstance) planActions(ctx EvalContext, change *pla
 	// This includes create triggers for actions such as "createBeforeDelete" (but no delete yet)
 	before, _ := n.triggersForEvent(change.Action)
 	var diags tfdiags.Diagnostics
-	// we don't need to worry about planning actions in configured order, as
-	// long as they are shown to the user and applied in order (we don't get new
-	// planned values from the provider for actions).
 	for _, trigger := range before {
 		if trigger.Condition != nil {
 			condition, condDiags := n.evaluateActionCondition(ctx, trigger)
@@ -1062,34 +1058,11 @@ func (n *NodePlannableResourceInstance) planActions(ctx EvalContext, change *pla
 			if !condition {
 				continue
 			}
+			n.planTriggeredActions(ctx, trigger, change.Action)
 		} else {
-			n.planTriggeredActions(trigger.Actions)
+			n.planTriggeredActions(ctx, trigger, change.Action)
 		}
 	}
-
-	// provider, schema, err := getProvider(ctx, n.resolvedProvider)
-	// if err != nil {
-	// 	diags = diags.Append(&hcl.Diagnostic{
-	// 		Severity: hcl.DiagError,
-	// 		Summary:  "Failed to get provider",
-	// 		Detail:   fmt.Sprintf("Failed to get provider: %s", err),
-	// 		Subject:  n.lifecycleActionTrigger.invokingSubject,
-	// 	})
-
-	// 	return diags
-	// }
-	// actionSchema := schema.Actions[n.actionConfig.Type]
-
-	// expander := ctx.InstanceExpander()
-	// if !expander.AllInstances().HasActionInstance(n.actionAddress) {
-	// 	diags = diags.Append(&hcl.Diagnostic{
-	// 		Severity: hcl.DiagError,
-	// 		Summary:  "Reference to non-existent action instance",
-	// 		Detail:   "Action instance was not found in the current context.",
-	// 		Subject:  n.lifecycleActionTrigger.invokingSubject,
-	// 	})
-	// 	return diags
-	// }
 
 	return nil
 }
@@ -1218,62 +1191,13 @@ func actionIsTriggeredByEvent(events []configs.ActionTriggerEvent, action plans.
 	return triggeredEvents
 }
 
-// FIXME: replace this with a more reusable version of evaluateActionCondition from node_action_trigger_instance_plan
+// @mildwonkey FIXME: replace this with a more reusable version of evaluateActionCondition from node_action_trigger_instance_plan? or something? this is a copy.
 func (n *NodePlannableResourceInstance) evaluateActionCondition(ctx EvalContext, trigger *configs.ActionTrigger) (bool, tfdiags.Diagnostics) {
 	var diags tfdiags.Diagnostics
 
-	rd := instances.RepetitionData{}
-	refs, refDiags := langrefs.ReferencesInExpr(addrs.ParseRef, trigger.Condition)
-	diags = diags.Append(refDiags)
-	if diags.HasErrors() {
-		return false, diags
-	}
-
-	for _, ref := range refs {
-		if ref.Subject == addrs.Self {
-			diags = diags.Append(&hcl.Diagnostic{
-				Severity: hcl.DiagError,
-				Summary:  "Self reference not allowed",
-				Detail:   `The condition expression cannot reference "self".`,
-				Subject:  trigger.Condition.Range().Ptr(),
-			})
-		}
-	}
-
-	if diags.HasErrors() {
-		return false, diags
-	}
-
-	if containsBeforeEvent(trigger.Events) {
-		// If events contains a before event we want to error if count or each is used
-		for _, ref := range refs {
-			if _, ok := ref.Subject.(addrs.CountAttr); ok {
-				diags = diags.Append(&hcl.Diagnostic{
-					Severity: hcl.DiagError,
-					Summary:  "Count reference not allowed",
-					Detail:   `The condition expression cannot reference "count" if the action is run before the resource is applied.`,
-					Subject:  trigger.Condition.Range().Ptr(),
-				})
-			}
-
-			if _, ok := ref.Subject.(addrs.ForEachAttr); ok {
-				diags = diags.Append(&hcl.Diagnostic{
-					Severity: hcl.DiagError,
-					Summary:  "Each reference not allowed",
-					Detail:   `The condition expression cannot reference "each" if the action is run before the resource is applied.`,
-					Subject:  trigger.Condition.Range().Ptr(),
-				})
-			}
-
-			if diags.HasErrors() {
-				return false, diags
-			}
-		}
-	} else {
-		// If there are only after events we allow self, count, and each
-		expander := ctx.InstanceExpander()
-		rd = expander.GetResourceInstanceRepetitionData(n.Addr)
-	}
+	// the condition may use count or for_each (but only with after_* actions)
+	expander := ctx.InstanceExpander()
+	rd := expander.GetResourceInstanceRepetitionData(n.Addr)
 
 	scope := ctx.EvaluationScope(nil, nil, rd)
 	val, conditionEvalDiags := scope.EvalExpr(trigger.Condition, cty.Bool)
@@ -1296,12 +1220,159 @@ func (n *NodePlannableResourceInstance) evaluateActionCondition(ctx EvalContext,
 }
 
 // planTriggeredActions plans and records planned actions for every action listed. The caller is responsible for checking that the action condition is true.
-func (n *NodePlannableResourceInstance) planTriggeredActions(actionRefs []configs.ActionRef) tfdiags.Diagnostics {
+func (n *NodePlannableResourceInstance) planTriggeredActions(ctx EvalContext, trigger *configs.ActionTrigger, event plans.Action) tfdiags.Diagnostics {
 	var diags tfdiags.Diagnostics
 
-	for _, actionRef := range actionRefs {
-		// get the action config from the action ref
-		fmt.Println(actionRef)
+	for _, actionRef := range trigger.Actions {
+		actionCfg, ok := n.ActionConfigs.GetOk(actionRef.ConfigAction)
+		if !ok {
+			// this should not be possible
+			diags = diags.Append(tfdiags.Sourceless(
+				tfdiags.Error,
+				"Missing action config in resource",
+				fmt.Sprintf("The Action configuration for %s was not attached to the resource. This is a bug with terraform and should be reported.", actionRef.ConfigAction),
+			))
+			return diags
+		}
+
+		prov, ok := n.resolvedActionProviders.GetOk(actionRef.ConfigAction)
+		if !ok {
+			diags = diags.Append(&hcl.Diagnostic{
+				Severity: hcl.DiagError,
+				Summary:  "Provider not found",
+				Detail:   fmt.Sprintf("The provider for action %s was not found in the current context.", actionRef.ConfigAction),
+				Subject:  &actionRef.Range,
+			})
+			return diags
+		}
+
+		provider, providerSchema, err := getProvider(ctx, prov)
+		diags = diags.Append(err)
+		if diags.HasErrors() {
+			return diags
+		}
+
+		actionSchema := providerSchema.Actions[actionCfg.Type]
+
+		// The configAction was derived from the ActionRef hcl.Expression referenced inside the resource's lifecycle block, and has not yet been
+		// expanded or fully evaluated, so we will do that now.
+		// Grab the instance key, necessary if the action uses [count.index] or [each.key]
+		repData := instances.RepetitionData{}
+		switch k := n.Addr.Resource.Key.(type) {
+		case addrs.IntKey:
+			repData.CountIndex = k.Value()
+		case addrs.StringKey:
+			repData.EachKey = k.Value()
+			repData.EachValue = cty.DynamicVal
+		}
+
+		ref, evalActionDiags := evaluateActionExpression(actionRef.Expr, repData)
+		diags = append(diags, evalActionDiags...)
+		if diags.HasErrors() {
+			continue
+		}
+
+		// The reference is either an action or action instance
+		var actionAddr addrs.AbsActionInstance
+		switch sub := ref.Subject.(type) {
+		case addrs.Action:
+			actionAddr = sub.Absolute(n.Addr.Module).Instance(addrs.NoKey)
+		case addrs.ActionInstance:
+			actionAddr = sub.Absolute(n.Addr.Module)
+		}
+
+		if !ctx.InstanceExpander().AllInstances().HasActionInstance(actionAddr) {
+			diags = diags.Append(&hcl.Diagnostic{
+				Severity: hcl.DiagError,
+				Summary:  "Reference to non-existent action instance",
+				Detail:   "Action instance was not found in the current context.",
+				Subject:  &actionRef.Range,
+			})
+		}
+
+		// now evaluate embedded action config using the *action* instance repetition data
+		keyData := ctx.InstanceExpander().GetActionInstanceRepetitionData(actionAddr)
+		configVal := cty.NullVal(actionSchema.ConfigSchema.ImpliedType())
+		if actionCfg.Config != nil {
+			var configDiags tfdiags.Diagnostics
+			configVal, _, configDiags = ctx.EvaluateBlock(actionCfg.Config, actionSchema.ConfigSchema, nil, keyData)
+
+			diags = diags.Append(configDiags)
+			if configDiags.HasErrors() {
+				return diags
+			}
+
+			valDiags := validateResourceForbiddenEphemeralValues(ctx, configVal, actionSchema.ConfigSchema)
+			diags = diags.Append(valDiags.InConfigBody(actionCfg.Config, actionRef.ConfigAction.String()))
+
+			if valDiags.HasErrors() {
+				return diags
+			}
+
+			var deprecationDiags tfdiags.Diagnostics
+			configVal, deprecationDiags = ctx.Deprecations().ValidateAndUnmarkConfig(configVal, actionSchema.ConfigSchema, n.ModulePath())
+			diags = diags.Append(deprecationDiags.InConfigBody(actionCfg.Config, actionAddr.String()))
+		}
+
+		// We remove the marks for planning
+		unmarkedConfig, _ := configVal.UnmarkDeepWithPaths()
+
+		cc := ctx.ClientCapabilities()
+		cc.DeferralAllowed = false // for now, deferrals in actions are always disabled
+		resp := provider.PlanAction(providers.PlanActionRequest{
+			ActionType:         actionCfg.Type,
+			ProposedActionData: unmarkedConfig,
+			ClientCapabilities: cc,
+		})
+		diags = append(diags, resp.Diagnostics...)
+		if diags.HasErrors() {
+			return diags
+		}
+
+		// i dunno what this is all about
+		// if len(resp.Diagnostics) > 0 {
+		// 	severity := hcl.DiagWarning
+		// 	message := "Warnings when planning action"
+		// 	err := resp.Diagnostics.Warnings().ErrWithWarnings()
+		// 	if resp.Diagnostics.HasErrors() {
+		// 		severity = hcl.DiagError
+		// 		message = "Failed to plan action"
+		// 		err = resp.Diagnostics.ErrWithWarnings()
+		// 	}
+
+		// 	diags = append(diags, tfdiags.Sourceless(
+		// 		tfdiags.Severity(severity),
+		// 	))
+
+		// 	diags = diags.Append(&hcl.Diagnostic{
+		// 		Severity: severity,
+		// 		Summary:  message,
+		// 		Detail:   err.Error(),
+		// 		//Subject:  n.lifecycleActionTrigger.invokingSubject, ??? This is really a sourceless issue
+		// 	})
+		// }
+		if resp.Deferred != nil {
+			// we always set allow_deferrals to be false for actions, so this
+			// should not happen
+			diags = diags.Append(deferring.UnexpectedProviderDeferralDiagnostic(actionAddr))
+		}
+		if resp.Diagnostics.HasErrors() {
+			return diags
+		}
+
+		ai := &plans.ActionInvocationInstance{
+			Addr: actionAddr,
+			ActionTrigger: &plans.ResourceActionTrigger{
+				TriggeringResourceAddr: n.Addr,
+				//ActionTriggerEvent:     event,
+				// ugh
+				// i have none of this
+			},
+			ProviderAddr: prov,
+			// we don't get a value back from the provider, so it's up to us to remove the ephemeral values before storing.
+			ConfigValue: ephemeral.RemoveEphemeralValues(configVal),
+		}
+		ctx.Changes().AppendActionInvocation(ai)
 	}
 
 	return diags

@@ -197,7 +197,7 @@ type GetProviderSchemaResponse struct {
 	// StateStores maps the state store type name to that type's schema.
 	StateStores map[string]Schema
 
-	// Actions maps the name of the action to its schema.
+	// Actions maps the type name of the action to its schema.
 	Actions map[string]ActionSchema
 
 	// Diagnostics contains any warnings or errors from the method call.

@@ -461,10 +461,11 @@ func (n *NodeAbstractResource) ActionsProvidedBy() addrs.Map[addrs.ConfigAction,
 
 	for _, at := range n.Config.Managed.ActionTriggers {
 		for _, aRef := range at.Actions {
-			actionCfg, ok := n.ActionConfigs.GetOk(aRef.ConfigAction.Action.InModule(n.ModulePath()))
+			actionCfg, ok := n.ActionConfigs.GetOk(aRef.ConfigAction)
 			if !ok {
 				// this really shouldn't happen, but is it worth a panic?
-				continue
+				// maybe.
+				panic("action config not found!")
 			}
 
 			if actionCfg != nil {

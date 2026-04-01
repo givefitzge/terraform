@@ -172,19 +172,6 @@ func (b *PlanGraphBuilder) Steps() []GraphTransformer {
 			generateConfigPathForImportTargets: b.GenerateConfigPath,
 		},
 
-		&ActionTriggerConfigTransformer{
-			Config:        b.Config,
-			Operation:     b.Operation,
-			ActionTargets: b.ActionTargets,
-			queryPlanMode: b.queryPlan,
-
-			ConcreteActionTriggerNodeFunc: func(node *nodeAbstractActionTrigger, _ RelativeActionTiming) dag.Vertex {
-				return &nodeActionTriggerPlanExpand{
-					nodeAbstractActionTrigger: node,
-				}
-			},
-		},
-
 		&ActionInvokePlanTransformer{
 			Config:        b.Config,
 			Operation:     b.Operation,
