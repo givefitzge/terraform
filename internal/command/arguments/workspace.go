@@ -32,6 +32,18 @@ func ParseWorkspace(args []string) (*Workspace, tfdiags.Diagnostics) {
 		))
 	}
 
+	// There should not be any non-flag arguments for the workspace list command.
+	// In future when other workspace subcommands start using the arguments package
+	// this code will need to change.
+	args = cmdFlags.Args()
+	if len(args) != 0 {
+		diags = diags.Append(tfdiags.Sourceless(
+			tfdiags.Error,
+			"Too many command line arguments",
+			"Expected no positional arguments.",
+		))
+	}
+
 	switch {
 	case jsonOutput:
 		return &Workspace{ViewType: ViewJSON}, diags
