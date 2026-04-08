@@ -1,0 +1,5 @@
+kind: NEW FEATURES
+body: 'workspace: The workspace list command will now produce JSON output when the -json flag is provided.'
+time: 2026-04-08T15:07:30.952104+01:00
+custom:
+    Issue: "38159"
