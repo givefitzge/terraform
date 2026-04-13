@@ -5674,21 +5674,52 @@ func TestTest_TeardownOrder(t *testing.T) {
 	}
 }
 
-func TestTest_OverrideDataListAttribute(t *testing.T) {
+func TestTest_OverrideDataMocking(t *testing.T) {
 	tcs := map[string]struct {
-		dir  string
-		code int
-		desc string
+		dir            string
+		expectedCode   int
+		expectedStdout string
+		expectedStderr string
 	}{
 		"plain_list_attribute": {
-			dir:  "override_data_list_attribute",
-			code: 0,
-			desc: "override_data with a computed cty.List(cty.Object) attribute",
+			dir:            "override_data_list_attribute",
+			expectedCode:   0,
+			expectedStdout: "1 passed, 0 failed.",
 		},
 		"nested_list_attribute": {
-			dir:  "override_data_nested_list_attribute",
-			code: 0,
-			desc: "override_data with a computed NestedType NestingList attribute",
+			dir:            "override_data_nested_list_attribute",
+			expectedCode:   0,
+			expectedStdout: "1 passed, 0 failed.",
+		},
+		"nested_list_attribute_with_object_value": {
+			dir:            "override_data_nested_list_attribute_object",
+			expectedCode:   0,
+			expectedStdout: "1 passed, 0 failed.",
+		},
+		"nested_list_attribute_with_invalid_type_value": {
+			dir:            "override_data_nested_list_attribute_invalid_type",
+			expectedCode:   1,
+			expectedStderr: "incompatible types; expected list of object, found",
+		},
+		"list_attribute_with_partial_element_values": {
+			dir:            "override_data_list_attribute_partial_elements",
+			expectedCode:   0,
+			expectedStdout: "1 passed, 0 failed.",
+		},
+		"set_attribute_with_partial_element_values": {
+			dir:            "override_data_complex_set_attribute_partial_elements",
+			expectedCode:   0,
+			expectedStdout: "1 passed, 0 failed.",
+		},
+		"nested_set_attribute_with_object_value": {
+			dir:            "override_data_complex_nested_set_attribute_object",
+			expectedCode:   0,
+			expectedStdout: "1 passed, 0 failed.",
+		},
+		"nested_list_attribute_with_partial_element_values": {
+			dir:            "override_data_nested_list_attribute_partial_elements",
+			expectedCode:   0,
+			expectedStdout: "1 passed, 0 failed.",
 		},
 	}
 
@@ -5725,7 +5756,6 @@ func TestTest_OverrideDataListAttribute(t *testing.T) {
 				t.Fatalf("expected init status code 0 but got %d: %s", code, output.All())
 			}
 
-			// Reset the streams for the next command.
 			streams, done = terminal.StreamsForTesting(t)
 			meta.Streams = streams
 			meta.View = views.NewView(streams)
@@ -5737,17 +5767,20 @@ func TestTest_OverrideDataListAttribute(t *testing.T) {
 			code := c.Run([]string{"-no-color"})
 			output := done(t)
 
-			if code != tc.code {
-				t.Errorf("expected status code %d but got %d:\n\n%s", tc.code, code, output.All())
+			if code != tc.expectedCode {
+				t.Fatalf("expected status code %d but got %d:\n\n%s", tc.expectedCode, code, output.All())
 			}
 
-			if tc.code == 0 {
-				if !strings.Contains(output.Stdout(), "1 passed, 0 failed.") {
-					t.Errorf("expected passing test output but got:\n\nstdout:\n%s\nstderr:\n%s", output.Stdout(), output.Stderr())
-				}
-				if output.Stderr() != "" {
-					t.Errorf("unexpected stderr output:\n%s", output.Stderr())
-				}
+			if tc.expectedStdout != "" && !strings.Contains(output.Stdout(), tc.expectedStdout) {
+				t.Errorf("expected stdout to contain %q but got:\n\nstdout:\n%s\nstderr:\n%s", tc.expectedStdout, output.Stdout(), output.Stderr())
+			}
+
+			if tc.expectedStderr != "" && !strings.Contains(output.Stderr(), tc.expectedStderr) {
+				t.Errorf("expected stderr to contain %q but got:\n\nstdout:\n%s\nstderr:\n%s", tc.expectedStderr, output.Stdout(), output.Stderr())
+			}
+
+			if tc.expectedCode == 0 && output.Stderr() != "" {
+				t.Errorf("unexpected stderr output:\n%s", output.Stderr())
 			}
 		})
 	}
