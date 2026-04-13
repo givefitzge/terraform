@@ -377,12 +377,14 @@ func TestTest_Runs(t *testing.T) {
 			code:        0,
 		},
 		"write-only-attributes-mocked": {
-			expectedOut: []string{"1 passed, 0 failed."},
-			code:        0,
+			expectedOut: []string{"0 passed, 1 failed."},
+			expectedErr: []string{"Test assertion failed", "wrong value"},
+			code:        1,
 		},
 		"write-only-attributes-overridden": {
-			expectedOut: []string{"1 passed, 0 failed."},
-			code:        0,
+			expectedOut: []string{"0 passed, 1 failed."},
+			expectedErr: []string{"Test assertion failed", "wrong value"},
+			code:        1,
 		},
 		"with-default-variables": {
 			args:        []string{"-var=input_two=universe"},

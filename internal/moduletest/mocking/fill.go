@@ -27,8 +27,9 @@ func fillAttribute(providedMock cty.Value, attribute *configschema.Attribute, pa
 		// For nested types, the providedMock value is interpreted in two ways:
 		// - If it's an object, it's treated as a single instance of the nested type,
 		//   and because we can't know how many instances are needed, we return an empty collection.
-		// - If it's a collection, it's treated as the whole nested type collection,
-		// and then we update each element of the collection with generated values where possible.
+		// - If it's already a collection, it's treated as the whole nested type
+		//   collection, and then we update each element of the collection with
+		//   generated values where possible.
 		// Note: The collection type must match the attribute's nested type.
 
 		switch attribute.NestedType.Nesting {

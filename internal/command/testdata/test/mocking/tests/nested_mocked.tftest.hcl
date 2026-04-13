@@ -8,22 +8,22 @@ mock_provider "test" {
       nested_list_value = [{name  = "first"}, {name  = "second"}]
       set_value = [{name  = "first"}, {name  = "second"}]
       nested_set_value = [{name  = "first"}, {name  = "second"}]
-      map_value = {
+      map_value = tomap({
         "key1": {
           name  = "first"
         },
         "key2": {
           name  = "third"
         }
-      }
-      nested_map_value = {
+      })
+      nested_map_value = tomap({
         "key1": {
           name  = "first"
         },
         "key2": {
           name  = "third"
         }
-      }
+      })
     }
   }
 }
