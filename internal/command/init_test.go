@@ -4367,6 +4367,8 @@ func TestInit_stateStore_configChanges(t *testing.T) {
 			t.Fatal("expected the default workspace to exist after migration, but it is missing")
 		}
 	})
+
+	// TODO: new test with missing provider lockfile
 }
 
 // Testing init's behaviors with `state_store` when the provider used for state storage in a previous init

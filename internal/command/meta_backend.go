@@ -2596,6 +2596,10 @@ func (m *Meta) stateStoreConfigNeedsMigration(cfg *configs.StateStore, cfgState 
 	}
 
 	pLock := opts.Locks.Provider(cfg.ProviderAddr)
+	if pLock == nil {
+		log.Printf("[TRACE] stateStoreConfigNeedsMigration: no lock for provider (%s), so migration is required", cfg.ProviderAddr)
+		return true
+	}
 	pVersion, err := providerreqs.GoVersionFromVersion(pLock.Version())
 	if err != nil {
 		log.Printf("[TRACE] stateStoreConfigNeedsMigration: unable to determine provider version (%s), so migration is required", err)
