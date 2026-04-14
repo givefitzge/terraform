@@ -17,7 +17,7 @@ type ImportStatement struct {
 
 // FindImportStatements recurses through the modules of the given configuration
 // and returns a set of all "import" blocks defined within after deduplication
-// on the From address.
+// on the To address.
 //
 // An "import" block in a parent module overrides an import block in a child
 // module when both target the same configuration object.

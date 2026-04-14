@@ -178,6 +178,9 @@ func (n *nodeExpandPlannableResource) expandResourceImports(ctx EvalContext, all
 		// do I need to get all possible expansions for the imp.RelModule and then only use the one for this actual node?
 		allMods := ctx.InstanceExpander().AllInstances().InstancesForModule(imp.RelModule, false)
 		for _, mod := range allMods {
+			// get the context from the module the import was defined in
+			ctx = evalContextForModuleInstance(ctx, mod)
+			state = ctx.State()
 			if imp.Config.ForEach == nil {
 				traversal, hds := hcl.AbsTraversalForExpr(imp.Config.To)
 				diags = diags.Append(hds)

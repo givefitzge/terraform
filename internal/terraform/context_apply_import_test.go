@@ -4,11 +4,13 @@
 package terraform
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/hashicorp/terraform/internal/addrs"
+	"github.com/hashicorp/terraform/internal/configs/configschema"
 	"github.com/hashicorp/terraform/internal/plans"
 	"github.com/hashicorp/terraform/internal/providers"
 	"github.com/hashicorp/terraform/internal/states"
@@ -19,7 +21,12 @@ import (
 func TestContextApply_import_in_module(t *testing.T) {
 	m := testModule(t, "import-block-in-module")
 
-	p := simpleMockProvider()
+	p := mockProviderWithResourceTypeSchema("test_object", &configschema.Block{
+		Attributes: map[string]*configschema.Attribute{
+			"id":          {Type: cty.String, Computed: true},
+			"test_string": {Type: cty.String, Optional: true},
+		},
+	})
 	p.ImportResourceStateFn = func(req providers.ImportResourceStateRequest) providers.ImportResourceStateResponse {
 		return providers.ImportResourceStateResponse{
 			ImportedResources: []providers.ImportedResource{
@@ -27,15 +34,20 @@ func TestContextApply_import_in_module(t *testing.T) {
 					TypeName: "test_object",
 					State: cty.ObjectVal(map[string]cty.Value{
 						"test_string": cty.StringVal("importable"),
+						"id":          cty.StringVal(req.ID),
 					}),
 				},
 			},
 		}
 	}
-	p.ReadResourceResponse = &providers.ReadResourceResponse{
-		NewState: cty.ObjectVal(map[string]cty.Value{
-			"test_string": cty.StringVal("importable"),
-		}),
+	p.ReadResourceFn = func(r providers.ReadResourceRequest) providers.ReadResourceResponse {
+		id := r.PriorState.GetAttr("id")
+		return providers.ReadResourceResponse{
+			NewState: cty.ObjectVal(map[string]cty.Value{
+				"test_string": cty.StringVal("importable"),
+				"id":          id,
+			}),
+		}
 	}
 
 	ctx := testContext2(t, &ContextOpts{
@@ -56,9 +68,29 @@ func TestContextApply_import_in_module(t *testing.T) {
 		t.Fatal("resource not imported")
 	}
 
-	rs := state.ResourceInstance(mustResourceInstanceAddr("module.child.test_object.bar"))
+	rs := state.ResourceInstance(mustResourceInstanceAddr("module.child.test_object.bar[\"first\"]"))
 	if rs == nil {
 		t.Fatal("imported resource not found in module")
+	}
+	var attrs map[string]interface{}
+	err := json.Unmarshal(rs.Current.AttrsJSON, &attrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := attrs["id"], "testa"; got != want {
+		t.Fatalf("wrong id for \"first\" got:  %#v\nwant: %#v", got, want)
+	}
+
+	rs = state.ResourceInstance(mustResourceInstanceAddr("module.child.test_object.bar[\"second\"]"))
+	if rs == nil {
+		t.Fatal("imported resource not found in module")
+	}
+	err = json.Unmarshal(rs.Current.AttrsJSON, &attrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := attrs["id"], "testb"; got != want {
+		t.Fatalf("wrong id for \"second\" got:  %#v\nwant: %#v", got, want)
 	}
 }
 
