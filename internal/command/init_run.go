@@ -220,8 +220,9 @@ func (c *InitCommand) run(initArgs *arguments.Init, view views.Init) int {
 		header = true
 	}
 
-	// The init command is not allowed to upgrade the provider used for PSS; terraform state migrate should be used instead.
-	if initArgs.Upgrade && config.Module.StateStore != nil {
+	// The init command is not allowed to upgrade the provider used for PSS (unless we're reconfiguring the state store).
+	// Unless users choose to reconfigure, they must upgrade the state store provider separately using `terraform state migrate -upgrade`.
+	if initArgs.Upgrade && !initArgs.Reconfigure && config.Module.StateStore != nil {
 		pAddr := config.Module.StateStore.ProviderAddr
 		old := previousLocks.Provider(pAddr)
 		new := configLocks.Provider(pAddr)

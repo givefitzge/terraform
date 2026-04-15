@@ -2297,6 +2297,7 @@ func TestInit_cancelProviders(t *testing.T) {
 	}
 }
 
+// Test different scenarios when upgrading providers with the -upgrade flag is attempted
 func TestInit_getUpgradePlugins(t *testing.T) {
 	t.Run("the -upgrade flag allows providers to be upgraded to latest versions matching constraints", func(t *testing.T) {
 		// Create a temporary working directory and copy in test fixtures
@@ -2425,7 +2426,7 @@ func TestInit_getUpgradePlugins(t *testing.T) {
 		}
 	})
 
-	t.Run("the -upgrade flag cannot be used to upgrade the state store provider", func(t *testing.T) {
+	t.Run("`init -upgrade` cannot be used to upgrade the state store provider", func(t *testing.T) {
 		// Create a temporary working directory and copy in test fixtures
 		td := t.TempDir()
 		testCopyDir(t, testFixturePath("init-with-state-store"), td)
@@ -2523,6 +2524,114 @@ func TestInit_getUpgradePlugins(t *testing.T) {
 				getproviders.MustParseVersionConstraints("> 1.0.0"),
 				[]getproviders.Hash{
 					getproviders.HashScheme1.New("wlbEC2mChQZ2hhgUhl6SeVLPP7fMqOFUZAQhQ9GIIno="),
+				},
+			),
+		}
+		if diff := cmp.Diff(gotProviderLocks, wantProviderLocks, depsfile.ProviderLockComparer); diff != "" {
+			t.Errorf("wrong version selections after upgrade\n%s", diff)
+		}
+	})
+
+	t.Run("`init -upgrade -reconfigure` can be used to upgrade the state store provider", func(t *testing.T) {
+		// Create a temporary working directory and copy in test fixtures
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-with-state-store"), td)
+		t.Chdir(td)
+
+		providerSource, close := newMockProviderSource(t, map[string][]string{
+			// config requires > 1.0.0
+			"test": {"1.2.3", "9.9.9"},
+		})
+		t.Cleanup(close)
+
+		// Mock provider to act as "hashicorp/test"
+		mockProvider := mockPluggableStateStorageProvider()
+
+		ui := new(cli.MockUi)
+		view, done := testView(t)
+		m := Meta{
+			testingOverrides:          metaOverridesForProvider(mockProvider),
+			Ui:                        ui,
+			View:                      view,
+			ProviderSource:            providerSource,
+			AllowExperimentalFeatures: true,
+		}
+
+		// Make Terraform believe that we already have version 1.2.3 installed.
+		installFakeProviderPackages(t, &m, map[string][]string{
+			"test": {"1.2.3"},
+		})
+		// Create a dependency lock file describing the hashicorp/test provider at version 1.2.3, to simulate a previous init with that version.
+		locks := depsfile.NewLocks()
+		locks.SetProvider(
+			addrs.NewDefaultProvider("test"),
+			getproviders.MustParseVersion("1.2.3"),
+			getproviders.MustParseVersionConstraints("> 1.0.0"),
+			[]getproviders.Hash{
+				getproviders.HashScheme1.New("wlbEC2mChQZ2hhgUhl6SeVLPP7fMqOFUZAQhQ9GIIno="),
+			},
+		)
+		if err := depsfile.SaveLocksToFile(locks, ".terraform.lock.hcl"); err != nil {
+			t.Fatalf("failed to write provider locks file: %s", err)
+		}
+
+		c := &InitCommand{
+			Meta: m,
+		}
+
+		args := []string{
+			"-upgrade=true",
+			"-reconfigure",
+			"-enable-pluggable-state-storage-experiment",
+		}
+		code := c.Run(args)
+		if code != 0 {
+			t.Fatalf("expected command to complete successfully, but it did not:\n%s", done(t).All())
+		}
+		output := done(t).Stdout()
+		expectedMsgs := []string{
+			"Installed hashicorp/test v9.9.9",
+		}
+		for _, msg := range expectedMsgs {
+			if !strings.Contains(output, msg) {
+				t.Fatalf("expected message %q not found:\n%s", msg, output)
+			}
+		}
+
+		// Assert the provider was upgraded.
+		cacheDir := m.providerLocalCacheDir()
+		gotPackages := cacheDir.AllAvailablePackages()
+		wantPackages := map[addrs.Provider][]providercache.CachedProvider{
+			addrs.NewDefaultProvider("test"): {
+				{
+					Provider:   addrs.NewDefaultProvider("test"),
+					Version:    getproviders.MustParseVersion("9.9.9"),
+					PackageDir: expectedPackageInstallPath("test", "9.9.9", false),
+				},
+				{
+					Provider:   addrs.NewDefaultProvider("test"),
+					Version:    getproviders.MustParseVersion("1.2.3"),
+					PackageDir: expectedPackageInstallPath("test", "1.2.3", false),
+				},
+			},
+		}
+		if diff := cmp.Diff(wantPackages, gotPackages); diff != "" {
+			t.Errorf("wrong cache directory contents after upgrade\n%s", diff)
+		}
+
+		// The provider locks should have changed.
+		locks, err := m.lockedDependencies()
+		if err != nil {
+			t.Fatalf("failed to get locked dependencies: %s", err)
+		}
+		gotProviderLocks := locks.AllProviders()
+		wantProviderLocks := map[addrs.Provider]*depsfile.ProviderLock{
+			addrs.NewDefaultProvider("test"): depsfile.NewProviderLock(
+				addrs.NewDefaultProvider("test"),
+				getproviders.MustParseVersion("9.9.9"),
+				getproviders.MustParseVersionConstraints("> 1.0.0"),
+				[]getproviders.Hash{
+					getproviders.HashScheme1.New("bRxrXpGHyZagKAC5yZZDB9fWBcdllOsFOZzzbJ1VZ0I="),
 				},
 			),
 		}
