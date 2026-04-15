@@ -2424,6 +2424,112 @@ func TestInit_getUpgradePlugins(t *testing.T) {
 			t.Errorf("wrong version selections after upgrade\n%s", diff)
 		}
 	})
+
+	t.Run("the -upgrade flag cannot be used to upgrade the provider used for pluggable state storage", func(t *testing.T) {
+		// Create a temporary working directory and copy in test fixtures
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-with-state-store"), td)
+		t.Chdir(td)
+
+		providerSource, close := newMockProviderSource(t, map[string][]string{
+			// config requires > 1.0.0
+			"test": {"1.2.3", "9.9.9"},
+		})
+		t.Cleanup(close)
+
+		// Mock provider to act as "hashicorp/test"
+		mockProvider := mockPluggableStateStorageProvider()
+
+		ui := new(cli.MockUi)
+		view, done := testView(t)
+		m := Meta{
+			testingOverrides:          metaOverridesForProvider(mockProvider),
+			Ui:                        ui,
+			View:                      view,
+			ProviderSource:            providerSource,
+			AllowExperimentalFeatures: true,
+		}
+
+		// Make Terraform believe that we already have version 1.2.3 installed.
+		installFakeProviderPackages(t, &m, map[string][]string{
+			"test": {"1.2.3"},
+		})
+		// Create a dependency lock file describing the hashicorp/test provider at version 1.2.3, to simulate a previous init with that version.
+		locks := depsfile.NewLocks()
+		locks.SetProvider(
+			addrs.NewDefaultProvider("test"),
+			getproviders.MustParseVersion("1.2.3"),
+			getproviders.MustParseVersionConstraints("> 1.0.0"),
+			[]getproviders.Hash{
+				getproviders.HashScheme1.New("wlbEC2mChQZ2hhgUhl6SeVLPP7fMqOFUZAQhQ9GIIno="),
+			},
+		)
+		if err := depsfile.SaveLocksToFile(locks, ".terraform.lock.hcl"); err != nil {
+			t.Fatalf("failed to write provider locks file: %s", err)
+		}
+
+		c := &InitCommand{
+			Meta: m,
+		}
+
+		args := []string{
+			"-upgrade=true",
+			"-enable-pluggable-state-storage-experiment",
+		}
+		code := c.Run(args)
+		if code == 0 {
+			t.Fatalf("command was not expected to complete successfully, but it did:\n%s", done(t).All())
+		}
+		output := done(t).Stderr()
+		expectedError := "Error: Cannot upgrade the provider used for pluggable state storage during \"terraform init -upgrade\""
+		if !strings.Contains(output, expectedError) {
+			t.Fatalf("expected error message not found:\n%s", output)
+		}
+
+		// Assert that no providers were upgraded.
+		//
+		// However, "test" v9.9.9 would be installed in the cache, because the error occurs after the upgrade
+		// process identifies that provider as a candidate for upgrade.
+		cacheDir := m.providerLocalCacheDir()
+		gotPackages := cacheDir.AllAvailablePackages()
+		wantPackages := map[addrs.Provider][]providercache.CachedProvider{
+			addrs.NewDefaultProvider("test"): {
+				{
+					Provider:   addrs.NewDefaultProvider("test"),
+					Version:    getproviders.MustParseVersion("9.9.9"),
+					PackageDir: expectedPackageInstallPath("test", "9.9.9", false),
+				},
+				{
+					Provider:   addrs.NewDefaultProvider("test"),
+					Version:    getproviders.MustParseVersion("1.2.3"),
+					PackageDir: expectedPackageInstallPath("test", "1.2.3", false),
+				},
+			},
+		}
+		if diff := cmp.Diff(wantPackages, gotPackages); diff != "" {
+			t.Errorf("wrong cache directory contents after upgrade\n%s", diff)
+		}
+
+		// The upgrade process was locked, so the provider locks should not have changed.
+		locks, err := m.lockedDependencies()
+		if err != nil {
+			t.Fatalf("failed to get locked dependencies: %s", err)
+		}
+		gotProviderLocks := locks.AllProviders()
+		wantProviderLocks := map[addrs.Provider]*depsfile.ProviderLock{
+			addrs.NewDefaultProvider("test"): depsfile.NewProviderLock(
+				addrs.NewDefaultProvider("test"),
+				getproviders.MustParseVersion("1.2.3"),
+				getproviders.MustParseVersionConstraints("> 1.0.0"),
+				[]getproviders.Hash{
+					getproviders.HashScheme1.New("wlbEC2mChQZ2hhgUhl6SeVLPP7fMqOFUZAQhQ9GIIno="),
+				},
+			),
+		}
+		if diff := cmp.Diff(gotProviderLocks, wantProviderLocks, depsfile.ProviderLockComparer); diff != "" {
+			t.Errorf("wrong version selections after upgrade\n%s", diff)
+		}
+	})
 }
 
 func TestInit_getProviderMissing(t *testing.T) {
