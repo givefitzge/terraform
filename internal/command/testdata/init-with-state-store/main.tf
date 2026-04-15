@@ -2,8 +2,7 @@ terraform {
 
   required_providers {
     test = {
-      source  = "hashicorp/test"
-      version = "> 1.0.0"
+      source = "hashicorp/test"
     }
   }
   state_store "test_store" {

@@ -2429,8 +2429,28 @@ func TestInit_getUpgradePlugins(t *testing.T) {
 	t.Run("`init -upgrade` cannot be used to upgrade the state store provider", func(t *testing.T) {
 		// Create a temporary working directory and copy in test fixtures
 		td := t.TempDir()
-		testCopyDir(t, testFixturePath("init-with-state-store"), td)
 		t.Chdir(td)
+
+		// Configuration uses a state store and has other provider requirements.
+		cfg := `
+terraform {
+
+  required_providers {
+    test = {
+      source  = "hashicorp/test"
+      version = "> 1.0.0"
+    }
+  }
+  state_store "test_store" {
+    provider "test" {
+    }
+
+    value = "foobar"
+  }
+}`
+		if err := os.WriteFile("main.tf", []byte(cfg), 0644); err != nil {
+			t.Fatalf("failed to write main.tf: %s", err)
+		}
 
 		providerSource, close := newMockProviderSource(t, map[string][]string{
 			// config requires > 1.0.0
@@ -2535,8 +2555,28 @@ func TestInit_getUpgradePlugins(t *testing.T) {
 	t.Run("`init -upgrade -reconfigure` can be used to upgrade the state store provider", func(t *testing.T) {
 		// Create a temporary working directory and copy in test fixtures
 		td := t.TempDir()
-		testCopyDir(t, testFixturePath("init-with-state-store"), td)
 		t.Chdir(td)
+
+		// Configuration uses a state store and has other provider requirements.
+		cfg := `
+terraform {
+
+  required_providers {
+    test = {
+      source  = "hashicorp/test"
+      version = "> 1.0.0"
+    }
+  }
+  state_store "test_store" {
+    provider "test" {
+    }
+
+    value = "foobar"
+  }
+}`
+		if err := os.WriteFile("main.tf", []byte(cfg), 0644); err != nil {
+			t.Fatalf("failed to write main.tf: %s", err)
+		}
 
 		providerSource, close := newMockProviderSource(t, map[string][]string{
 			// config requires > 1.0.0
