@@ -17,6 +17,7 @@ import (
 // The WorkspaceList view is used for the `workspace list` subcommand.
 type WorkspaceList interface {
 	List(selected string, list []string, diags tfdiags.Diagnostics)
+	Diagnostics(tfdiags.Diagnostics)
 }
 
 // NewWorkspace returns the Workspace implementation for the given ViewType.
@@ -54,6 +55,20 @@ type WorkspaceOutput struct {
 
 // List is used to log the list of present workspaces and indicate which is currently selected
 func (v *WorkspaceJSON) List(current string, list []string, diags tfdiags.Diagnostics) {
+	v.output(current, list, diags)
+}
+
+// Diagnostics is used to log diagnostics when an error occurs before we have a list of workspaces to show
+// The JSON output of Diagnostics matches the structure of List, but with empty data.
+//
+// THIS COMMAND SHOULD ONLY BE USED BEFORE RETURNING A NON-ZERO ERROR CODE.
+func (v *WorkspaceJSON) Diagnostics(diags tfdiags.Diagnostics) {
+	// JSON output describing errors must be in the same structure as the output of List.
+	// There is no list data or selected workspace to show when we're using this method.
+	v.output("", nil, diags)
+}
+
+func (v *WorkspaceJSON) output(current string, list []string, diags tfdiags.Diagnostics) {
 	output := WorkspaceListOutput{}
 
 	for _, item := range list {
@@ -118,6 +133,10 @@ func (v *WorkspaceHuman) List(selected string, list []string, diags tfdiags.Diag
 		}
 		v.output(out.String())
 	}
+}
+
+func (v *WorkspaceHuman) Diagnostics(diags tfdiags.Diagnostics) {
+	v.view.Diagnostics(diags)
 }
 
 func (v *WorkspaceHuman) output(msg string) string {
