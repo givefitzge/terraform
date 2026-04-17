@@ -5,6 +5,7 @@ package arguments
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform/internal/tfdiags"
@@ -75,6 +76,8 @@ type Init struct {
 
 	Args []string
 
+	StateStoreProviderLockFile string
+
 	// The -enable-pluggable-state-storage-experiment flag is used in control flow logic in the init command.
 	// TODO(SarahFrench/radeksimko): Remove this once the feature is no longer
 	// experimental
@@ -112,6 +115,7 @@ func ParseInit(args []string, experimentsEnabled bool) (*Init, tfdiags.Diagnosti
 	cmdFlags.BoolVar(&init.Json, "json", false, "json")
 	cmdFlags.Var(&init.BackendConfig, "backend-config", "")
 	cmdFlags.Var(&init.PluginPath, "plugin-dir", "plugin directory")
+	cmdFlags.StringVar(&init.StateStoreProviderLockFile, "state-provider-lock-file", "", "path to the dependency lock file to use when establishing trust in the provider used for state storage. This is only used when input is disabled. Otherwise, users will be shown interactive prompts instead. Defaults to the working directory's .terraform.lock.hcl file.")
 
 	// Used for enabling experimental code that's invoked before configuration is parsed.
 	cmdFlags.BoolVar(&init.EnablePssExperiment, "enable-pluggable-state-storage-experiment", false, "Enable the pluggable state storage experiment")
@@ -135,6 +139,56 @@ func ParseInit(args []string, experimentsEnabled bool) (*Init, tfdiags.Diagnosti
 				tfdiags.Error,
 				"Cannot use -enable-pluggable-state-storage-experiment flag without experiments enabled",
 				"Terraform cannot use the -enable-pluggable-state-storage-experiment flag (or TF_ENABLE_PLUGGABLE_STATE_STORAGE environment variable) unless experiments are enabled.",
+			))
+		}
+		if init.StateStoreProviderLockFile != "" {
+			diags = diags.Append(tfdiags.Sourceless(
+				tfdiags.Error,
+				"Cannot use -state-provider-lock-file flag without experiments enabled",
+				"Terraform cannot use the -state-provider-lock-file flag unless experiments are enabled.",
+			))
+		}
+	}
+
+	if !init.EnablePssExperiment && init.StateStoreProviderLockFile != "" {
+		diags = diags.Append(tfdiags.Sourceless(
+			tfdiags.Error,
+			"Cannot use -state-provider-lock-file flag unless the pluggable state storage experiment is enabled",
+			"Terraform cannot use the -state-provider-lock-file flag unless the pluggable state storage experiment is enabled. Add the -enable-pluggable-state-storage-experiment flag to your command.",
+		))
+	}
+
+	if init.StateStoreProviderLockFile != "" {
+		if init.InputEnabled {
+			diags = diags.Append(tfdiags.Sourceless(
+				tfdiags.Error,
+				"Cannot use -state-provider-lock-file flag when input is enabled",
+				"The -state-provider-lock-file flag is only intended to be used when input is disabled. Either remove the flag or add -input=false to your command.",
+			))
+		}
+		if init.Upgrade {
+			diags = diags.Append(tfdiags.Sourceless(
+				tfdiags.Error,
+				"The -state-provider-lock-file and -upgrade options are mutually-exclusive",
+				"The -upgrade flag causes Terraform to ignore prior dependency locks, so it cannot be used in conjunction with the -state-provider-lock-file flag. Remove one flag and try again.",
+			))
+		}
+
+		// Validate that the path uses the expected file extension
+		if !strings.HasSuffix(init.StateStoreProviderLockFile, ".lock.hcl") {
+			diags = diags.Append(tfdiags.Sourceless(
+				tfdiags.Error,
+				"Invalid file path supplied for -state-provider-lock-file",
+				"The file specified by -state-provider-lock-file must have a .lock.hcl extension.",
+			))
+		}
+
+		// Validate that the file exists
+		if _, err := os.Stat(init.StateStoreProviderLockFile); os.IsNotExist(err) {
+			diags = diags.Append(tfdiags.Sourceless(
+				tfdiags.Error,
+				"Specified lock file does not exist",
+				"Terraform cannot find the dependency lock file at the path specified by -state-provider-lock-file. Please ensure the file exists and the path is correct.",
 			))
 		}
 	}
