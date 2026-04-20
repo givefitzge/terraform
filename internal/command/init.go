@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"os"
 	"reflect"
 	"slices"
 	"sort"
@@ -31,6 +32,7 @@ import (
 	"github.com/hashicorp/terraform/internal/didyoumean"
 	"github.com/hashicorp/terraform/internal/getproviders"
 	"github.com/hashicorp/terraform/internal/getproviders/providerreqs"
+	"github.com/hashicorp/terraform/internal/getproviders/reattach"
 	"github.com/hashicorp/terraform/internal/providercache"
 	"github.com/hashicorp/terraform/internal/states"
 	"github.com/hashicorp/terraform/internal/tfdiags"
@@ -231,6 +233,14 @@ func (c *InitCommand) initBackend(ctx context.Context, root *configs.Module, ini
 			}
 		}
 
+		// Annotate state_store config representation with info about how the provider
+		// is supplied to Terraform.
+		isReattached, err := reattach.IsProviderReattached(root.StateStore.ProviderAddr, os.Getenv("TF_REATTACH_PROVIDERS"))
+		if err != nil {
+			panic(fmt.Sprintf("Unable to determine if provider %s is reattached while initializing the state store. This is a bug in Terraform and should be reported: %v", root.StateStore.ProviderAddr.ForDisplay(), err))
+		}
+		root.StateStore.ProviderSupplyMode = getproviders.DetermineProviderSupplyMode(c.Meta.isProviderDevOverride(root.StateStore.ProviderAddr), isReattached, root.StateStore.ProviderAddr.IsBuiltIn())
+
 		opts = &BackendOpts{
 			StateStoreConfig: root.StateStore,
 			Locks:            configLocks,
@@ -362,6 +372,8 @@ func (c *InitCommand) getProvidersFromConfig(ctx context.Context, config *config
 	// any overridden providers, so we'll warn about it to avoid later
 	// confusion when Terraform ends up using a different provider than the
 	// lock file called for.
+	//
+	// This warning is only added here to avoid duplication; not raised in getProvidersFromState.
 	diags = diags.Append(c.providerDevOverrideInitWarnings())
 
 	// Collect the provider dependencies from the configuration.
@@ -460,12 +472,6 @@ func (c *InitCommand) getProvidersFromConfig(ctx context.Context, config *config
 func (c *InitCommand) getProvidersFromState(ctx context.Context, state *states.State, configLocks *depsfile.Locks, upgrade bool, pluginDirs []string, flagLockfile string, view views.Init) (output bool, resultingLocks *depsfile.Locks, diags tfdiags.Diagnostics) {
 	ctx, span := tracer.Start(ctx, "install providers from state")
 	defer span.End()
-
-	// Dev overrides cause the result of "terraform init" to be irrelevant for
-	// any overridden providers, so we'll warn about it to avoid later
-	// confusion when Terraform ends up using a different provider than the
-	// lock file called for.
-	diags = diags.Append(c.providerDevOverrideInitWarnings())
 
 	if state == nil {
 		// if there is no state there are no providers to get
