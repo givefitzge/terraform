@@ -368,7 +368,6 @@ const (
 	SafeInitActionInvalid        SafeInitAction = 0
 	SafeInitActionProceed        SafeInitAction = 'P'
 	SafeInitActionPromptForInput SafeInitAction = 'I'
-	SafeInitActionExitEarly      SafeInitAction = 'E'
 	SafeInitActionNotRelevant    SafeInitAction = 'N' // For when a state store isn't in use at all!
 )
 
