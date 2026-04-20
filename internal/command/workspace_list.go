@@ -103,6 +103,10 @@ Usage: terraform [global options] workspace list
 
   List Terraform workspaces.
 
+Options:
+
+  -json            If specified, machine readable output will be
+                   printed in JSON format.
 `
 	return strings.TrimSpace(helpText)
 }
@@ -146,7 +150,7 @@ func (v *workspaceListHuman) List(selected string, list []string, diags tfdiags.
 func newWorkspaceList(vt arguments.ViewType, view *views.View, ui cli.Ui, meta *Meta) views.WorkspaceList {
 	switch vt {
 	case arguments.ViewJSON:
-		panic("JSON output is not supported for workspace list command")
+		return views.NewWorkspaceList(vt, view)
 	case arguments.ViewHuman:
 		return &workspaceListHuman{
 			ui:   ui,
