@@ -375,7 +375,7 @@ const (
 // The method downloads any missing providers that aren't already downloaded and then returns
 // dependency lock data based on the configuration.
 // The dependency lock file itself isn't updated here.
-func (c *InitCommand) getProvidersFromConfig(ctx context.Context, config *configs.Config, upgrade bool, pluginDirs []string, flagLockfile string, view views.Init) (output bool, resultingLocks *depsfile.Locks, safeInitAction SafeInitAction, authResult *getproviders.PackageAuthenticationResult, diags tfdiags.Diagnostics) {
+func (c *InitCommand) getProvidersFromConfig(ctx context.Context, config *configs.Config, previousLocks *depsfile.Locks, upgrade bool, pluginDirs []string, flagLockfile string, view views.Init) (output bool, resultingLocks *depsfile.Locks, safeInitAction SafeInitAction, authResult *getproviders.PackageAuthenticationResult, diags tfdiags.Diagnostics) {
 	ctx, span := tracer.Start(ctx, "install providers from config")
 	defer span.End()
 
@@ -754,13 +754,6 @@ func (c *InitCommand) getProvidersFromConfig(ctx context.Context, config *config
 		}
 
 		mode = providercache.InstallUpgrades
-	}
-
-	// Previous locks from dep locks file are needed so we don't re-download any providers
-	previousLocks, moreDiags := c.lockedDependencies()
-	diags = diags.Append(moreDiags)
-	if diags.HasErrors() {
-		return false, nil, SafeInitActionInvalid, nil, diags
 	}
 
 	// Determine which required providers are already downloaded, and download any
