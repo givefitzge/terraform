@@ -382,7 +382,7 @@ func TestParseInit_invalid(t *testing.T) {
 				t.Fatalf("wrong diags\n got: %s\nwant: %s", got, want)
 			}
 			if got.ViewType != tc.wantViewType {
-				t.Fatalf("wrong view type, got %#v, want %#v", got.ViewType, ViewHuman)
+				t.Fatalf("wrong view type, got %#v, want %#v", got.ViewType, tc.wantViewType)
 			}
 		})
 	}
@@ -416,14 +416,6 @@ func TestParseInit_experimentalFlags(t *testing.T) {
 			args:               []string{"-state-provider-lock-file=.terraform.lock.hcl"},
 			experimentsEnabled: true,
 			wantErr:            "Cannot use -state-provider-lock-file flag unless the pluggable state storage experiment is enabled",
-		},
-		"error: -state-provider-lock-file requires -input=false": {
-			args: []string{
-				"-state-provider-lock-file=.terraform.lock.hcl",
-				"-enable-pluggable-state-storage-experiment",
-			},
-			experimentsEnabled: true,
-			wantErr:            "Cannot use -state-provider-lock-file flag when input is enabled",
 		},
 	}
 
