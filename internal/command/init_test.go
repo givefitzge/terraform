@@ -4639,6 +4639,80 @@ func TestInit_stateStore_newWorkingDir_inAutomationProviderApproval(t *testing.T
 			t.Fatalf("expected dependency lock file to contain version %s for provider %s that was supplied via the -state-provider-lock-file flag, but got version %s", suppliedLockFileVersion, mockProviderAddress.ForDisplay(), gotLock.Version())
 		}
 	})
+
+	t.Run("a state store provider downloaded via HTTP can be automatically approved if it already exists in the .terraform.lock.hcl file", func(t *testing.T) {
+		// Create a temporary, uninitialized working directory with configuration including a state store
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-with-state-store"), td)
+		t.Chdir(td)
+
+		// Set up mock provider source that mocks out hashicorp/test via HTTP.
+		// This stops Terraform auto-approving the provider installation.
+		mockProviderAddress := addrs.NewDefaultProvider("test")
+		expectedVersion := "1.2.3"
+		source := newMockProviderSourceUsingTestHttpServer(t, map[string][]string{
+			"hashicorp/test": {expectedVersion, "9.9.9"}, // Extra version - expected version is downloaded, not the latest
+		})
+		mockProvider := mockPluggableStateStorageProvider()
+
+		ui := new(cli.MockUi)
+		view, done := testView(t)
+		meta := Meta{
+			Ui:                        ui,
+			View:                      view,
+			AllowExperimentalFeatures: true,
+			testingOverrides: &testingOverrides{
+				Providers: map[addrs.Provider]providers.Factory{
+					mockProviderAddress: providers.FactoryFixed(mockProvider),
+				},
+			},
+			ProviderSource: source,
+		}
+		c := &InitCommand{
+			Meta: meta,
+		}
+
+		// Create a local .terraform.lock.hcl file that already contains the state store provider version
+		lockFileName := ".terraform.lock.hcl"
+		suppliedLockFileVersion := getproviders.MustParseVersion(expectedVersion)
+		locks := depsfile.NewLocks()
+		locks.SetProvider(
+			mockProviderAddress,
+			suppliedLockFileVersion,
+			getproviders.MustParseVersionConstraints("> 1.0.0"),
+			[]getproviders.Hash{
+				getproviders.HashScheme1.New("wlbEC2mChQZ2hhgUhl6SeVLPP7fMqOFUZAQhQ9GIIno="),
+			},
+		)
+		depsfile.SaveLocksToFile(locks, lockFileName)
+
+		args := []string{
+			"-enable-pluggable-state-storage-experiment=true",
+			"-input=false", // Simulate running in automation where input is disabled
+			// -state-provider-lock-file flag isn't used; this test shows it can fall back to using the .terraform.lock.hcl file in the working directory
+		}
+		code := c.Run(args)
+		testOutput := done(t)
+		if code != 0 {
+			t.Fatalf("expected code 0 exit code, got %d, output: \n%s", code, testOutput.All())
+		}
+
+		// Check output via view
+		output := testOutput.All()
+		expectedOutputs := []string{
+			"Initializing the state store...",
+			"The state store provider was approved automatically",
+			"Terraform has been successfully initialized!",
+		}
+		for _, expected := range expectedOutputs {
+			if !strings.Contains(output, expected) {
+				t.Fatalf("expected output to include %q, but got':\n %s", expected, output)
+			}
+		}
+		// No need for assertions about the dependency lock file
+		// as it was created during test setup.
+	})
+
 }
 
 // Testing init's behaviors with `state_store` when run in a working directory where the configuration
