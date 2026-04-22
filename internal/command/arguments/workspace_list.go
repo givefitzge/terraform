@@ -9,14 +9,6 @@ import (
 	"github.com/hashicorp/terraform/internal/tfdiags"
 )
 
-// Workspace represents the command-line arguments common between all workspace subcommands.
-//
-// Subcommands that accept additional arguments should have a specific struct that embeds this struct.
-type Workspace struct {
-	// ViewType specifies which output format to use
-	ViewType ViewType
-}
-
 // WorkspaceList represent arguments specific to the `terraform workspace list` command.
 type WorkspaceList struct {
 	Workspace
