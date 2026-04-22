@@ -56,6 +56,9 @@ func TestContextApply_import_in_module(t *testing.T) {
 		},
 	})
 
+	diags := ctx.Validate(m, nil)
+	tfdiags.AssertNoErrors(t, diags)
+
 	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 	})
@@ -120,6 +123,9 @@ func TestContextApply_import_in_nested_module(t *testing.T) { // more nested tha
 		},
 	})
 
+	diags := ctx.Validate(m, nil)
+	tfdiags.AssertNoErrors(t, diags)
+
 	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 	})
@@ -163,6 +169,9 @@ func TestContextApply_import_in_expanded_module(t *testing.T) { // count AND for
 			addrs.NewDefaultProvider("test"): testProviderFuncFixed(p),
 		},
 	})
+
+	diags := ctx.Validate(m, nil)
+	tfdiags.AssertNoErrors(t, diags)
 
 	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
