@@ -38,40 +38,41 @@ func (c *ValidateCommand) Run(rawArgs []string) int {
 
 	// Parse and validate flags
 	args, diags := arguments.ParseValidate(rawArgs)
-	if diags.HasErrors() {
-		c.View.Diagnostics(diags)
-		c.View.HelpPrompt("validate")
-		return 1
-	}
 
 	c.ParsedArgs = args
 	view := views.NewValidate(args.ViewType, c.View)
 
+	// Now the view is ready, process any diagnostics from argument parsing
+	if diags.HasErrors() {
+		if args.ViewType == arguments.ViewHuman {
+			defer c.View.HelpPrompt("validate")
+		}
+		return view.Results(diags)
+	}
+
 	// If the query flag is set, include query files in the validation.
 	c.includeQueryFiles = c.ParsedArgs.Query
-
-	loader, err := c.initConfigLoader()
-	if err != nil {
-		diags = diags.Append(err)
-		view.Diagnostics(diags)
-		return 1
-	}
-
-	var varDiags tfdiags.Diagnostics
-	c.VariableValues, varDiags = args.Vars.CollectValues(func(filename string, src []byte) {
-		loader.Parser().ForceFileSource(filename, src)
-	})
-	diags = diags.Append(varDiags)
-	if diags.HasErrors() {
-		view.Diagnostics(diags)
-		return 1
-	}
 
 	// After this point, we must only produce JSON output if JSON mode is
 	// enabled, so all errors should be accumulated into diags and we'll
 	// print out a suitable result at the end, depending on the format
 	// selection. All returns from this point on must be tail-calls into
 	// view.Results in order to produce the expected output.
+
+	loader, err := c.initConfigLoader()
+	if err != nil {
+		diags = diags.Append(err)
+		return view.Results(diags)
+	}
+
+	var varDiags tfdiags.Diagnostics
+	c.VariableValues, varDiags = args.Vars.CollectValues(func(filename string, src []byte) {
+		loader.Parser().ForceFileSource(filename, src)
+	})
+	if varDiags.HasErrors() {
+		diags = diags.Append(varDiags)
+		return view.Results(diags)
+	}
 
 	dir, err := filepath.Abs(args.Path)
 	if err != nil {

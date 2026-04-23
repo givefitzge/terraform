@@ -220,6 +220,35 @@ func (c *InitCommand) run(initArgs *arguments.Init, view views.Init) int {
 		header = true
 	}
 
+	// The init command is not allowed to upgrade the provider used for PSS (unless we're reconfiguring the state store).
+	// Unless users choose to reconfigure, they must upgrade the state store provider separately using `terraform state migrate -upgrade`.
+	if initArgs.Upgrade && !initArgs.Reconfigure && config.Module.StateStore != nil {
+		pAddr := config.Module.StateStore.ProviderAddr
+		old := previousLocks.Provider(pAddr)
+		new := configLocks.Provider(pAddr)
+		if old == nil || new == nil {
+			panic(fmt.Sprintf(`Unexpected missing provider lock for %s during init -upgrade: 
+prior lock: %#v
+new lock: %#v`, pAddr.ForDisplay(), old, new))
+		}
+		if !new.Version().Same((old.Version())) {
+			// The upgrade has impacted the provider
+			diags = diags.Append(tfdiags.Sourceless(
+				tfdiags.Error,
+				"Cannot upgrade the provider used for pluggable state storage during \"terraform init -upgrade\"",
+				fmt.Sprintf(`While upgrading providers Terraform attempted to upgrade the %s (%q) provider, which is used by the state_store block in your configuration.
+Please use \"terraform state migrate -upgrade\" to upgrade the state store provider and navigate migrating your state between the two versions. You can then re-attempt \"terraform init -upgrade\" to upgrade the rest of your providers.
+
+If you do not intend to upgrade the state store provider, please update your configuration to pin to the current version (%s), and re-run \"terraform init -upgrade\" to upgrade the rest of your providers.
+`,
+					pAddr.Type, pAddr.ForDisplay(), old.Version()),
+			),
+			)
+			view.Diagnostics(diags)
+			return 1
+		}
+	}
+
 	// If we outputted information, then we need to output a newline
 	// so that our success message is nicely spaced out from prior text.
 	if header {
