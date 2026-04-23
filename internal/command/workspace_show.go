@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/cli"
 	"github.com/hashicorp/terraform/internal/command/arguments"
 	"github.com/posener/complete"
 )
@@ -24,7 +25,7 @@ func (c *WorkspaceShowCommand) Run(rawArgs []string) int {
 	_, diags := arguments.ParseWorkspaceShow(rawArgs)
 	if diags.HasErrors() {
 		c.showDiagnostics(diags)
-		return 1
+		return cli.RunResultHelp
 	}
 
 	workspace, err := c.Workspace()
