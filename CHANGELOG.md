@@ -16,6 +16,8 @@ NOTE: This is a fork of [hashicorp/terraform](https://github.com/hashicorp/terra
 
 * Added extra verbosity to plan output during `terraform plan` for easier debugging of resource diffs.
 * Exploring how the graph walk works in `internal/terraform/context_plan.go`.
+* Increased default parallelism from 10 to 20 in `internal/command/meta_backend.go` for faster local applies on my machine.
+* Noted that `terraform graph` output can be piped to `dot -Tsvg` for a quick visual — added a reminder comment near the graph command entrypoint.
 
 ---
 
