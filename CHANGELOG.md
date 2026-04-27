@@ -12,6 +12,11 @@ NOTE: This is a fork of [hashicorp/terraform](https://github.com/hashicorp/terra
 
 * No changes yet.
 
+## Personal Notes
+
+* Added extra verbosity to plan output during `terraform plan` for easier debugging of resource diffs.
+* Exploring how the graph walk works in `internal/terraform/context_plan.go`.
+
 ---
 
 For information on v1.5 and earlier releases, see [CHANGELOG-v1.5.md](CHANGELOG-v1.5.md).
