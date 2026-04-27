@@ -2,6 +2,8 @@
 
 NOTE: This is a fork of [hashicorp/terraform](https://github.com/hashicorp/terraform). See [previous releases](.changes/previous-releases.md) for the upstream changelog history.
 
+> **Personal fork** – I'm using this to experiment with Terraform internals and learn how the plan/apply cycle works. Changes here are not intended for upstream submission.
+
 ## Bug Fixes
 
 * No changes yet.
