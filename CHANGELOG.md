@@ -19,6 +19,7 @@ NOTE: This is a fork of [hashicorp/terraform](https://github.com/hashicorp/terra
 * Increased default parallelism from 10 to 20 in `internal/command/meta_backend.go` for faster local applies on my machine.
 * Noted that `terraform graph` output can be piped to `dot -Tsvg` for a quick visual — added a reminder comment near the graph command entrypoint.
 * Added a local alias `tf` in shell profile pointing to this fork's binary so it doesn't conflict with the system-installed `terraform`.
+* Changed default `TF_LOG` level hint in CLI output to suggest `DEBUG` instead of `TRACE` — `TRACE` is too noisy for day-to-day debugging; `DEBUG` is usually sufficient.
 
 ---
 
